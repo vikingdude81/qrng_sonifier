@@ -1,0 +1,37 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "QRNG Sonifier"
+abstract: >-
+  Real-time audio synthesis and visualization tool for Quantum Random Number
+  Generator (QRNG) data from ANU QRNG API. Features statistical analysis,
+  anomaly detection, live spectrograms, and multi-modal interfaces.
+authors:
+  - alias: vikingdude81
+repository-code: "https://github.com/vikingdude81/qrng_sonifier"
+license: MIT
+version: "1.0.0"
+date-released: "2026-04-13"
+keywords:
+  - quantum-random-number-generator
+  - sonification
+  - anomaly-detection
+  - signal-processing
+  - randomness-testing
+references:
+  - type: website
+    title: "ANU Quantum Random Numbers Service"
+    url: "https://qrng.anu.edu.au/"
+  - type: report
+    title: "A Statistical Test Suite for Random and Pseudorandom Number Generators for Cryptographic Applications"
+    authors:
+      - family-names: Rukhin
+        given-names: Andrew
+      - family-names: Soto
+        given-names: Juan
+      - family-names: Nechvatal
+        given-names: James
+    number: "SP 800-22 Rev. 1a"
+    institution:
+      name: "National Institute of Standards and Technology"
+    year: 2010
