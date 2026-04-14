@@ -9,7 +9,6 @@ requests>=2.26.0
 
 # Audio synthesis
 sounddevice>=0.4.3
-soundfile>=0.10.3
 
 # Visualization (headless mode)
 matplotlib>=3.5.0

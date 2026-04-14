@@ -23,6 +23,7 @@ Trigger catalogue
 
 from __future__ import annotations
 import csv
+import logging
 import os
 import time
 import threading
@@ -30,6 +31,8 @@ import numpy as np
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Dict, Any
 from features import FeatureFrame
+
+logger = logging.getLogger(__name__)
 
 try:
     import sounddevice as sd
@@ -170,8 +173,8 @@ def _play_event(event_type: str, severity: str) -> None:
         audio = _synth_event(event_type, severity)
         try:
             sd.play(audio, samplerate=SAMPLE_RATE, blocking=True)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Audio playback failed for event '%s': %s", event_type, e)
     threading.Thread(target=_play, daemon=True).start()
 
 
@@ -225,7 +228,7 @@ class AnomalyDetector:
             "timestamp", "frame_index", "trigger", "severity",
             "source", "feature_value", "threshold", "message",
         ])
-        print(f"[anomaly] Log -> {self._log_path}")
+        logger.info("Log -> %s", self._log_path)
 
     # ------------------------------------------------------------------ #
     #  Public API                                                          #
@@ -322,7 +325,7 @@ class AnomalyDetector:
 
     def close(self) -> None:
         self._csv.close()
-        print(f"[anomaly] Log closed: {self._log_path}")
+        logger.info("Log closed: %s", self._log_path)
 
     def summary(self) -> Dict[str, int]:
         """Return fire counts per trigger."""
@@ -379,9 +382,7 @@ class AnomalyDetector:
         if self._callback:
             self._callback(event)
 
-        print(
-            f"[anomaly] * {cfg.severity.upper():8s} | {name:20s} | {msg}"
-        )
+        logger.info("* %-8s | %-20s | %s", cfg.severity.upper(), name, msg)
         return event
 
     @staticmethod

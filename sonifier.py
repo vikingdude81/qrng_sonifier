@@ -20,18 +20,20 @@ Dual-source spatial layout (when PRNG comparison is active)
 """
 
 from __future__ import annotations
+import logging
 import numpy as np
 import threading
-import time
 from typing import Optional
 from features import FeatureFrame
+
+logger = logging.getLogger(__name__)
 
 try:
     import sounddevice as sd
     SOUNDDEVICE_AVAILABLE = True
 except ImportError:
     SOUNDDEVICE_AVAILABLE = False
-    print("[sonifier] Warning: sounddevice not installed. Audio output disabled.")
+    logger.warning("sounddevice not installed — audio output disabled.")
 
 
 SAMPLE_RATE = 44100
@@ -110,7 +112,7 @@ class Sonifier:
 
     def start(self) -> None:
         if not SOUNDDEVICE_AVAILABLE:
-            print("[sonifier] sounddevice unavailable - audio disabled.")
+            logger.warning("sounddevice unavailable — audio disabled.")
             return
         self._running = True
         self._stream = sd.OutputStream(
@@ -122,14 +124,14 @@ class Sonifier:
         )
         self._stream.start()
         mode = "dual-source" if self.dual_source else "single-source"
-        print(f"[sonifier] Audio stream started ({mode}).")
+        logger.info("Audio stream started (%s).", mode)
 
     def stop(self) -> None:
         self._running = False
         if self._stream:
             self._stream.stop()
             self._stream.close()
-        print("[sonifier] Audio stream stopped.")
+        logger.info("Audio stream stopped.")
 
     def push_frame(
         self,

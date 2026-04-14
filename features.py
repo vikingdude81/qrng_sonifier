@@ -11,11 +11,14 @@ Each window of uint8 samples produces a FeatureFrame:
 """
 
 from __future__ import annotations
+import logging
 import numpy as np
 from dataclasses import dataclass, field
 from typing import Deque
 from collections import deque
 import scipy.stats as stats
+
+logger = logging.getLogger(__name__)
 
 
 MAX_ENTROPY_BITS = 8.0  # uint8 theoretical max
@@ -173,7 +176,8 @@ class FeatureEngine:
                 return 0.5
             H = np.log(RS) / np.log(n / 2.0)
             return float(np.clip(H, 0.0, 1.0))
-        except Exception:
+        except Exception as e:
+            logger.debug("Hurst exponent calculation failed: %s", e)
             return 0.5
 
     @staticmethod
@@ -288,34 +292,12 @@ class FeatureEngine:
 
     @staticmethod
     def _autocorr_lag(k: int, w: np.ndarray) -> float:
-        """
-        Autocorrelation at lag k (generalization of autocorr_lag1).
-        
-        Parameters
-        ----------
-        k : int
-            Lag value.
-        w : ndarray
-            Input array.
-            
-        Returns
-        -------
-        float
-            Autocorrelation at lag k, in [-1, 1].
-        """
+        """Autocorrelation at arbitrary lag k, in [-1, 1]."""
         if len(w) <= k:
             return 0.0
-            
         x = w - w.mean()
         denom = np.dot(x, x)
-        
         if denom == 0:
             return 0.0
-            
         ac = np.dot(x[:-k], x[k:]) / denom
         return float(np.clip(ac, -1.0, 1.0))
-
-    @staticmethod
-    def _autocorr(w: np.ndarray, lag: int = 1) -> float:
-        """Alias for autocorr_lag(k)."""
-        return FeatureEngine._autocorr_lag(lag, w)

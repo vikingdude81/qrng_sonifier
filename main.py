@@ -28,6 +28,7 @@ Dependencies
 
 from __future__ import annotations
 import argparse
+import logging
 import signal
 import time
 import yaml
@@ -39,10 +40,12 @@ from sonifier import Sonifier
 from renderer import Renderer
 from anomaly_triggers import AnomalyDetector
 
+logger = logging.getLogger(__name__)
+
 
 def load_config(config_path: str) -> dict:
-    """Load configuration from YAML file, merging with defaults."""
-    defaults = {
+    """Load configuration from YAML file, deep-merging with defaults."""
+    defaults: dict = {
         "output_dir": "./output",
         "duration": None,
         "render_interval": 60.0,
@@ -51,21 +54,21 @@ def load_config(config_path: str) -> dict:
         "window": 512,
         "step": 128,
     }
-    
+
     config = defaults.copy()
-    
+
     if Path(config_path).exists():
         with open(config_path, 'r') as f:
-            file_config = yaml.safe_load(f)
-        
-        # Deep merge (handle nested dicts like prng_comparison)
+            file_config = yaml.safe_load(f) or {}
+
         for key, value in file_config.items():
             if isinstance(value, dict):
-                config[key] = defaults.get(key, {}).copy()
-                config[key].update(value)
+                config[key] = {**defaults.get(key, {}), **value}
             else:
                 config[key] = value
-    
+    else:
+        logger.warning("Config file not found: %s — using defaults.", config_path)
+
     return config
 
 
@@ -73,17 +76,18 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="QRNG Sonifier - real-time audio + spectrogram + metrics"
     )
+    # Use None as sentinel so we can detect "not explicitly set" vs "default"
     p.add_argument("--duration",          type=float, default=None)
-    p.add_argument("--output-dir",        type=str,   default="./output")
-    p.add_argument("--render-interval",   type=float, default=60.0)
+    p.add_argument("--output-dir",        type=str,   default=None)
+    p.add_argument("--render-interval",   type=float, default=None)
     p.add_argument("--prng",              action="store_true",
                    help="Enable PRNG comparison stream (dual-source mode)")
-    p.add_argument("--prng-gen",          type=str,   default="pcg64",
+    p.add_argument("--prng-gen",          type=str,   default=None,
                    choices=["mt19937", "pcg64", "sfc64"])
     p.add_argument("--prng-seed",         type=int,   default=None)
-    p.add_argument("--batch-size",        type=int,   default=1024)
-    p.add_argument("--window",            type=int,   default=512)
-    p.add_argument("--step",              type=int,   default=128)
+    p.add_argument("--batch-size",        type=int,   default=None)
+    p.add_argument("--window",            type=int,   default=None)
+    p.add_argument("--step",              type=int,   default=None)
     p.add_argument("--no-audio",          action="store_true")
     p.add_argument("--no-anomaly",        action="store_true")
     p.add_argument("--anomaly-no-audio",  action="store_true",
@@ -92,6 +96,50 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--config",            type=str,   default=None,
                    help="Load configuration from YAML file (overrides CLI defaults)")
     return p
+
+
+def _resolve(cli_val, cfg_val, default):
+    """Return cli_val if explicitly set (not None), else cfg_val if present, else default."""
+    if cli_val is not None:
+        return cli_val
+    if cfg_val is not None:
+        return cfg_val
+    return default
+
+
+def _build_args(cli_args, config: dict):
+    """Merge CLI arguments with loaded config, CLI taking precedence."""
+
+    class Args:
+        pass
+
+    args = Args()
+    cfg_prng = config.get("prng_comparison", {})
+    cfg_api  = config.get("api", {})
+    cfg_feat = config.get("features", {})
+    cfg_vis  = config.get("visualization", {})
+    cfg_aud  = config.get("audio", {})
+    cfg_anom = config.get("anomaly", {})
+
+    args.duration         = _resolve(cli_args.duration,        config.get("duration"),        None)
+    args.output_dir       = _resolve(cli_args.output_dir,      config.get("output_dir"),      "./output")
+    args.render_interval  = _resolve(cli_args.render_interval, cfg_vis.get("render_interval"), 60.0)
+    args.prng             = cli_args.prng or cfg_prng.get("enabled", False)
+    args.prng_gen         = _resolve(cli_args.prng_gen,        cfg_prng.get("generator"),     "pcg64")
+    args.prng_seed        = _resolve(cli_args.prng_seed,       cfg_prng.get("seed"),          None)
+    args.batch_size       = _resolve(cli_args.batch_size,      config.get("batch_size"),      1024)
+    args.window           = _resolve(cli_args.window,          config.get("window"),          512)
+    args.step             = _resolve(cli_args.step,            config.get("step"),            128)
+    args.no_audio         = cli_args.no_audio  or not cfg_aud.get("enabled", True)
+    args.no_anomaly       = cli_args.no_anomaly or not cfg_anom.get("enabled", True)
+    args.anomaly_no_audio = cli_args.anomaly_no_audio
+    args.verbose          = cli_args.verbose
+    args.poll_interval    = cfg_api.get("poll_interval", 0.5)
+    args.retry_max        = cfg_api.get("retry_max_attempts", 3)
+    args.retry_backoff    = cfg_api.get("retry_backoff_base", 2.0)
+    args.history_size     = cfg_feat.get("history", 200)
+
+    return args
 
 
 def print_banner(args) -> None:
@@ -106,42 +154,28 @@ def print_banner(args) -> None:
 
 
 def main() -> None:
-    # Parse CLI arguments first
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s %(levelname)s %(name)s: %(message)s',
+    )
+
     cli_args = build_parser().parse_args()
-    
-    # Load config file if specified (takes precedence over defaults)
-    config = {}
+
+    config: dict = {}
     if cli_args.config:
         config = load_config(cli_args.config)
-        print(f"[main] Loaded configuration from {cli_args.config}")
-    
-    # Merge CLI args with config (CLI takes precedence when explicitly set)
-    class Args:
-        def __init__(self):
-            self.duration = cli_args.duration if cli_args.duration is not None else config.get("duration")
-            self.output_dir = cli_args.output_dir if cli_args.output_dir != "./output" or "output_dir" in config else config.get("output_dir", "./output")
-            self.render_interval = cli_args.render_interval if cli_args.render_interval != 60.0 or "render_interval" in config else config.get("render_interval", 60.0)
-            self.prng = cli_args.prng or config.get("prng_comparison", {}).get("enabled", False)
-            self.prng_gen = cli_args.prng_gen if cli_args.prng_gen != "pcg64" else config.get("prng_comparison", {}).get("generator", "pcg64")
-            self.prng_seed = cli_args.prng_seed or config.get("prng_comparison", {}).get("seed")
-            self.batch_size = cli_args.batch_size if cli_args.batch_size != 1024 else config.get("batch_size", 1024)
-            self.window = cli_args.window if cli_args.window != 512 else config.get("window", 512)
-            self.step = cli_args.step if cli_args.step != 128 else config.get("step", 128)
-            self.no_audio = cli_args.no_audio or not config.get("audio", {}).get("enabled", True)
-            self.no_anomaly = cli_args.no_anomaly or not config.get("anomaly", {}).get("enabled", True)
-            self.anomaly_no_audio = cli_args.anomaly_no_audio
-            self.verbose = cli_args.verbose
-    
-    args = Args()
+        logger.info("Loaded configuration from %s", cli_args.config)
+
+    args = _build_args(cli_args, config)
     print_banner(args)
 
     # ── Sources ───────────────────────────────────────────────────────
     qrng_ingestor = QRNGIngestor(
-        batch_size=args.batch_size, 
-        poll_interval=config.get("api", {}).get("poll_interval", 0.5),
-        retry_max_attempts=config.get("api", {}).get("retry_max_attempts", 3),
-        retry_backoff_base=config.get("api", {}).get("retry_backoff_base", 2.0),
-        verbose=args.verbose
+        batch_size=args.batch_size,
+        poll_interval=args.poll_interval,
+        retry_max_attempts=args.retry_max,
+        retry_backoff_base=args.retry_backoff,
+        verbose=args.verbose,
     )
     prng_source = (
         PRNGSource(
@@ -155,13 +189,11 @@ def main() -> None:
     )
 
     # ── Feature engines ───────────────────────────────────────────────
-    history_size = config.get("features", {}).get("history", 200)
-    qrng_engine = FeatureEngine(window=args.window, step=args.step, history=history_size)
-    prng_engine = FeatureEngine(window=args.window, step=args.step, history=history_size) if args.prng else None
+    qrng_engine = FeatureEngine(window=args.window, step=args.step, history=args.history_size)
+    prng_engine = FeatureEngine(window=args.window, step=args.step, history=args.history_size) if args.prng else None
 
     # ── Output layers ─────────────────────────────────────────────────
-    render_interval = config.get("visualization", {}).get("render_interval", args.render_interval)
-    renderer = Renderer(output_dir=args.output_dir, render_interval=render_interval)
+    renderer = Renderer(output_dir=args.output_dir, render_interval=args.render_interval)
     sonifier = Sonifier(dual_source=args.prng) if not args.no_audio else None
     detector = (
         AnomalyDetector(
@@ -175,7 +207,7 @@ def main() -> None:
     shutdown = {"requested": False}
 
     def _handle(sig, frame):
-        print("\n[main] Shutdown signal received...")
+        logger.info("Shutdown signal received...")
         shutdown["requested"] = True
 
     signal.signal(signal.SIGINT,  _handle)
@@ -188,7 +220,7 @@ def main() -> None:
     if sonifier:
         sonifier.start()
 
-    print("[main] Waiting for first batch...")
+    logger.info("Waiting for first batch...")
 
     start_time         = time.time()
     last_render        = start_time
@@ -201,24 +233,21 @@ def main() -> None:
     try:
         while not shutdown["requested"]:
             if args.duration and (time.time() - start_time) >= args.duration:
-                print(f"[main] Duration {args.duration}s reached.")
+                logger.info("Duration %.1fs reached.", args.duration)
                 break
 
-            # QRNG batch
             qrng_batch = qrng_ingestor.get_batch(timeout=10.0)
             if qrng_batch is None:
-                print("[main] Timeout on QRNG batch - retrying...")
+                logger.warning("Timeout on QRNG batch — retrying...")
                 continue
             total_samples_qrng += len(qrng_batch)
 
-            # PRNG batch
             prng_batch = None
             if prng_source:
                 prng_batch = prng_source.get_batch(timeout=2.0)
                 if prng_batch is not None:
                     total_samples_prng += len(prng_batch)
 
-            # Feature extraction
             qrng_frames = qrng_engine.push(qrng_batch)
             prng_frames = (
                 prng_engine.push(prng_batch)
@@ -235,27 +264,20 @@ def main() -> None:
             for qf, pf in paired:
                 total_frames += 1
 
-                # KL divergence
                 kl = 0.0
                 if pf is not None:
                     kl = AnomalyDetector._kl_divergence(qf.raw_window, pf.raw_window)
 
-                # Render CSV
                 renderer.push_frame(qf, qf.raw_window)
 
-                # Audio synthesis
                 if sonifier:
                     sonifier.push_frame(qf, prng_frame=pf, kl_divergence=kl)
 
-                # Anomaly detection
                 if detector:
                     events = detector.push(qf, prng_frame=pf)
                     for e in events:
-                        anomaly_counts[e.trigger_name] = (
-                            anomaly_counts.get(e.trigger_name, 0) + 1
-                        )
+                        anomaly_counts[e.trigger_name] = anomaly_counts.get(e.trigger_name, 0) + 1
 
-                # Console
                 if args.verbose:
                     kl_str = f"  KL={kl:.4f}" if pf else ""
                     print(
@@ -268,13 +290,12 @@ def main() -> None:
                         f"{kl_str}"
                     )
 
-            # Periodic PNG export
             if time.time() - last_render >= args.render_interval:
                 renderer.render_spectrogram(suffix=f"_frame{total_frames:05d}")
                 last_render = time.time()
 
     finally:
-        print("\n[main] Shutting down...")
+        logger.info("Shutting down...")
         qrng_ingestor.stop()
         if prng_source:
             prng_source.stop()

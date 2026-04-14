@@ -3,7 +3,7 @@ app.py — Web Dashboard for QRNG Sonifier with WebSocket Bridge integration.
 
 Provides a real-time web interface with:
 - Live feature plots using Plotly
-- Spectrogram visualization  
+- Spectrogram visualization
 - Anomaly event feed
 - Configuration controls
 - Real-time streaming from CLI via WebSocket bridge
@@ -11,53 +11,52 @@ Provides a real-time web interface with:
 
 from __future__ import annotations
 import json
+import logging
 import threading
 import time
 import os
-from flask import Flask, render_template, jsonify, Response
+from flask import Flask, render_template, jsonify
 from flask_socketio import SocketIO, emit
 import numpy as np
-import plotly.graph_objects as go
-from plotly.utils import PlotlyJSONEncoder
+
+logger = logging.getLogger(__name__)
 
 
 class QRNGDashboard:
     """WebSocket-enabled web dashboard for real-time QRNG monitoring."""
 
-    def __init__(self, host="127.0.0.1", port=5000):
+    def __init__(self, host: str = "127.0.0.1", port: int = 5000):
         self.host = host
         self.port = port
-        
-        # Flask app
+
         self.app = Flask(__name__)
-        self.app.config['SECRET_KEY'] = 'qrng-sonifier-secret'
+        self.app.config['SECRET_KEY'] = os.environ.get('QRNG_SECRET_KEY', 'qrng-sonifier-secret')
         self.socketio = SocketIO(self.app, cors_allowed_origins="*", async_mode='threading')
-        
+
         # Data storage (thread-safe)
         self._lock = threading.Lock()
         self._frames: list = []
         self._anomaly_events: list = []
-        self._latest_frame: dict = None
-        
+        self._latest_frame: dict | None = None
+
         # Streaming state
         self._streaming = False
-        self._last_update = 0.0
+        self._start_time: float = 0.0
+        self._last_update: float = 0.0
 
     def setup_routes(self) -> None:
-        """Set up Flask routes."""
-        
+        """Set up Flask routes and SocketIO event handlers."""
+
         @self.app.route('/')
         def index():
             return render_template('index.html')
-        
+
         @self.app.route('/api/frames')
         def get_frames():
             with self._lock:
-                frames = self._frames[-100:]  # Last 100 frames
-            
-            data = []
-            for f in frames:
-                data.append({
+                frames = self._frames[-100:]
+            data = [
+                {
                     'index': f['index'],
                     'entropy': f['entropy'],
                     'bias': f['bias'],
@@ -68,52 +67,64 @@ class QRNGDashboard:
                     'chi_square': f.get('chi_square', 0.0),
                     'serial_corr': f.get('serial_corr', 0.0),
                     'gap_test_z': f.get('gap_test_z', 0.0),
-                })
-            
+                }
+                for f in frames
+            ]
             return jsonify({'frames': data, 'count': len(data)})
-        
+
         @self.app.route('/api/latest')
         def get_latest():
             with self._lock:
                 if self._latest_frame:
                     return jsonify(self._latest_frame)
                 return jsonify({})
-        
+
         @self.app.route('/api/anomalies')
         def get_anomalies():
             with self._lock:
                 events = self._anomaly_events[-50:]
-            
             return jsonify({'events': events, 'count': len(events)})
-        
+
         @self.app.route('/api/stats')
         def get_stats():
             with self._lock:
+                uptime = (time.time() - self._start_time) if self._streaming else 0.0
                 stats = {
                     'total_frames': len(self._frames),
                     'streaming': self._streaming,
                     'last_update': self._last_update,
-                    'uptime': time.time() - getattr(self, '_start_time', 0) if (self._start_time := getattr(self, '_start_time', None)) else 0,
+                    'uptime': uptime,
                 }
             return jsonify(stats)
+
+        # SocketIO event handlers — registered on the instance's socketio
+        @self.socketio.on('cli_frame_update')
+        def handle_cli_frame(data):
+            """Receive frame updates from CLI WebSocket bridge."""
+            self.update_frame(data)
+            emit('frame_update', data, broadcast=True)
+
+        @self.socketio.on('cli_anomaly_event')
+        def handle_cli_anomaly(data):
+            """Receive anomaly events from CLI WebSocket bridge."""
+            self.update_anomaly(data)
+            emit('anomaly_event', data, broadcast=True)
 
     def update_frame(self, frame_data: dict) -> None:
         """Update with a new feature frame."""
         with self._lock:
             self._frames.append(frame_data)
+            self._last_update = time.time()
             self._latest_frame = {
                 'index': frame_data['index'],
-                'timestamp': time.time(),
-                **{k: v for k, v in frame_data.items() if k != 'raw_window'}
+                'timestamp': self._last_update,
+                **{k: v for k, v in frame_data.items() if k != 'raw_window'},
             }
 
     def update_anomaly(self, event_data: dict) -> None:
         """Update with a new anomaly event."""
         with self._lock:
-            self._anomaly_events.append({
-                **event_data,
-                'timestamp': time.time()
-            })
+            self._anomaly_events.append({**event_data, 'timestamp': time.time()})
 
     def start_streaming(self) -> None:
         """Enable real-time streaming."""
@@ -126,22 +137,9 @@ class QRNGDashboard:
         with self._lock:
             self._streaming = False
 
-    # Socket event handlers for CLI integration
-    @socketio.on('cli_frame_update')
-    def handle_cli_frame(data):
-        """Receive frame updates from CLI WebSocket bridge."""
-        dashboard.update_frame(data)
-        emit('frame_update', data, broadcast=True)
 
-    @socketio.on('cli_anomaly_event')
-    def handle_cli_anomaly(data):
-        """Receive anomaly events from CLI WebSocket bridge."""
-        dashboard.update_anomaly(data)
-        emit('anomaly_event', data, broadcast=True)
-
-
-# Global dashboard instance for CLI integration
-dashboard = None
+# Global dashboard instance — initialised by run_server() before any requests
+dashboard: QRNGDashboard | None = None
 
 
 def get_dashboard() -> QRNGDashboard:
@@ -152,11 +150,10 @@ def get_dashboard() -> QRNGDashboard:
     return dashboard
 
 
-def generate_templates():
+def generate_templates() -> None:
     """Generate the HTML templates for the dashboard."""
-    
     os.makedirs('web_dashboard/templates', exist_ok=True)
-    
+
     html_content = '''<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -197,7 +194,7 @@ def generate_templates():
     <div class="header">
         <h1>QRNG Sonifier - Real-time Dashboard</h1>
     </div>
-    
+
     <div class="status-bar">
         <span><span id="status-indicator" class="status-indicator"></span><span id="streaming-status">Connecting...</span></span>
         <span id="frame-count">Frames: 0</span>
@@ -210,7 +207,7 @@ def generate_templates():
                 <h2>Feature Timeline (Last 100 Frames)</h2>
                 <div id="main_plot"></div>
             </div>
-            
+
             <div class="panel">
                 <h2>Additional Statistics</h2>
                 <div class="stat-grid" style="margin-top: 15px;">
@@ -235,7 +232,7 @@ def generate_templates():
                 <h2>Anomaly Events</h2>
                 <div id="anomaly-list" class="anomaly-list"></div>
             </div>
-            
+
             <div class="panel">
                 <h2>Live Statistics</h2>
                 <div class="stat-grid">
@@ -258,67 +255,52 @@ def generate_templates():
 
     <script>
         const socket = io();
-        
+        let sessionStart = null;
+        let uptimeInterval = null;
+
         function initPlot() {
             Plotly.newPlot('main_plot', [], {
                 margin: { t: 30, r: 20, l: 50, b: 40 },
                 showlegend: true,
-                legend: { x: 0.98, y: 0.98 }
+                legend: { x: 0.98, y: 0.98 },
+                paper_bgcolor: '#16213e',
+                plot_bgcolor: '#0f3460',
+                font: { color: '#eee' }
             });
         }
 
         function updatePlot(frames) {
             const traces = [
-                {
-                    x: frames.map(f => f.index),
-                    y: frames.map(f => f.entropy),
-                    name: 'Entropy',
-                    line: { color: '#e67e22' }
-                },
-                {
-                    x: frames.map(f => f.index),
-                    y: frames.map(f => f.bias * 5),
-                    name: 'Bias (×5)',
-                    line: { color: '#e74c3c', dash: 'dash' }
-                },
-                {
-                    x: frames.map(f => f.index),
-                    y: frames.map(f => f.hurst * 10),
-                    name: 'Hurst (×10)',
-                    line: { color: '#2ecc71' }
-                },
-                {
-                    x: frames.map(f => f.index),
-                    y: frames.map(f => f.spectral_flat * 5),
-                    name: 'Spectral Flat (×5)',
-                    line: { color: '#3498db', dash: 'dot' }
-                }
+                { x: frames.map(f => f.index), y: frames.map(f => f.entropy),          name: 'Entropy',            line: { color: '#e67e22' } },
+                { x: frames.map(f => f.index), y: frames.map(f => f.bias * 5),         name: 'Bias (x5)',          line: { color: '#e74c3c', dash: 'dash' } },
+                { x: frames.map(f => f.index), y: frames.map(f => f.hurst * 10),       name: 'Hurst (x10)',        line: { color: '#2ecc71' } },
+                { x: frames.map(f => f.index), y: frames.map(f => f.spectral_flat * 5), name: 'Spectral Flat (x5)', line: { color: '#3498db', dash: 'dot' } }
             ];
-
             Plotly.react('main_plot', traces, {
                 margin: { t: 30, r: 20, l: 60, b: 50 },
-                xaxis: { title: 'Frame Index' },
-                yaxis: { title: 'Value (scaled)' }
+                xaxis: { title: 'Frame Index', color: '#eee' },
+                yaxis: { title: 'Value (scaled)', color: '#eee' },
+                paper_bgcolor: '#16213e',
+                plot_bgcolor: '#0f3460',
+                font: { color: '#eee' }
             });
         }
 
         function updateStats(frame) {
             document.getElementById('entropy-val').textContent = frame.entropy.toFixed(3);
-            document.getElementById('bias-val').textContent = frame.bias.toFixed(3);
-            document.getElementById('hurst-val').textContent = frame.hurst.toFixed(3);
-            document.getElementById('chi-square').textContent = (frame.chi_square || 0).toFixed(3);
+            document.getElementById('bias-val').textContent    = frame.bias.toFixed(3);
+            document.getElementById('hurst-val').textContent   = frame.hurst.toFixed(3);
+            document.getElementById('chi-square').textContent  = (frame.chi_square  || 0).toFixed(3);
             document.getElementById('serial-corr').textContent = (frame.serial_corr || 0).toFixed(3);
-            document.getElementById('gap-test').textContent = (frame.gap_test_z || 0).toFixed(3);
+            document.getElementById('gap-test').textContent    = (frame.gap_test_z  || 0).toFixed(3);
         }
 
         function updateAnomalies(events) {
             const container = document.getElementById('anomaly-list');
-            
             if (!events.length) {
                 container.innerHTML = '<p style="color: #666; text-align: center;">No anomalies</p>';
                 return;
             }
-
             container.innerHTML = events.slice(-20).reverse().map(e => `
                 <div class="anomaly-item ${e.severity}">
                     <span class="anomaly-name">${e.trigger}</span>
@@ -328,44 +310,49 @@ def generate_templates():
             `).join('');
         }
 
+        function startUptimeCounter() {
+            sessionStart = Date.now();
+            if (uptimeInterval) clearInterval(uptimeInterval);
+            uptimeInterval = setInterval(() => {
+                const seconds = Math.floor((Date.now() - sessionStart) / 1000);
+                document.getElementById('uptime').textContent = `Uptime: ${seconds}s`;
+            }, 1000);
+        }
+
         socket.on('connect', () => {
             document.getElementById('streaming-status').textContent = 'Connected';
             document.getElementById('status-indicator').classList.add('status-active');
+            startUptimeCounter();
+        });
+
+        socket.on('disconnect', () => {
+            document.getElementById('streaming-status').textContent = 'Disconnected';
+            document.getElementById('status-indicator').classList.remove('status-active');
+            if (uptimeInterval) clearInterval(uptimeInterval);
         });
 
         socket.on('frame_update', (data) => {
             updateStats(data);
-            
             fetch('/api/frames')
                 .then(r => r.json())
-                .then(d => updatePlot(d.frames));
-                
-            document.getElementById('frame-count').textContent = `Frames: ${d?.count || data.index}`;
+                .then(d => {
+                    updatePlot(d.frames);
+                    document.getElementById('frame-count').textContent = `Frames: ${d.count}`;
+                });
         });
 
-        socket.on('anomaly_event', (data) => {
+        socket.on('anomaly_event', () => {
             fetch('/api/anomalies')
                 .then(r => r.json())
                 .then(d => updateAnomalies(d.events));
         });
 
         initPlot();
-        
-        setInterval(() => {
-            const uptimeEl = document.getElementById('uptime');
-            let seconds = 0;
-            const counter = setInterval(() => {
-                seconds++;
-                uptimeEl.textContent = `Uptime: ${seconds}s`;
-            }, 1000);
-            
-            socket.on('disconnect', () => clearInterval(counter));
-        }, 1000);
 
+        // Initial data load
         fetch('/api/frames')
             .then(r => r.json())
             .then(d => updatePlot(d.frames));
-        
         fetch('/api/anomalies')
             .then(r => r.json())
             .then(d => updateAnomalies(d.events));
@@ -375,20 +362,22 @@ def generate_templates():
 
     with open('web_dashboard/templates/index.html', 'w') as f:
         f.write(html_content)
+    logger.info("Generated web dashboard template.")
 
 
-def run_server(host="127.0.0.1", port=5000, debug=False):
+def run_server(host: str = "127.0.0.1", port: int = 5000, debug: bool = False) -> None:
     """Run the web dashboard server."""
     global dashboard
-    
-    # Create and setup dashboard
+
+    generate_templates()
+
     dashboard = QRNGDashboard(host=host, port=port)
     dashboard.setup_routes()
-    
-    print(f"Starting QRNG Dashboard at http://{host}:{port}")
-    socketio.run(dashboard.app, host=host, port=port, debug=debug, allow_unsafe_werkzeug=True)
+
+    logger.info("Starting QRNG Dashboard at http://%s:%d", host, port)
+    dashboard.socketio.run(dashboard.app, host=host, port=port, debug=debug, allow_unsafe_werkzeug=True)
 
 
 if __name__ == '__main__':
-    generate_templates()
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
     run_server(debug=True)

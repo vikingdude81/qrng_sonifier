@@ -9,6 +9,7 @@ Outputs
 
 from __future__ import annotations
 import csv
+import logging
 import time
 import os
 import numpy as np
@@ -16,15 +17,20 @@ import matplotlib
 matplotlib.use("Agg")  # headless backend for file export
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-from matplotlib.colors import Normalize
 from typing import List
 from features import FeatureFrame
+
+logger = logging.getLogger(__name__)
 
 # Publication style parameters
 DPI = 300
 FIGURE_SIZE = (14, 8)
 COLORMAP = "inferno"
 FONT_FAMILY = "DejaVu Sans"
+
+# Cap in-memory history to prevent unbounded growth in long sessions.
+# At 512 samples/frame this is ~256 KB of raw data and a manageable frame list.
+MAX_FRAME_HISTORY = 1000
 
 plt.rcParams.update({
     "font.family": FONT_FAMILY,
@@ -42,10 +48,19 @@ class Renderer:
     Collects FeatureFrames and raw samples, then exports:
     - Rolling metrics to CSV (append mode, flushed per frame)
     - Spectrogram PNG on demand or at interval
+
+    Parameters
+    ----------
+    output_dir : str
+        Directory for all output files.
+    render_interval : float
+        Hint for callers on how often (seconds) to call render_spectrogram.
+        Not used internally — stored for convenience.
     """
 
-    def __init__(self, output_dir: str = "."):
+    def __init__(self, output_dir: str = ".", render_interval: float = 60.0):
         self.output_dir = output_dir
+        self.render_interval = render_interval
         os.makedirs(output_dir, exist_ok=True)
 
         ts = time.strftime("%Y%m%d_%H%M%S")
@@ -61,7 +76,7 @@ class Renderer:
             "entropy", "bias", "autocorr_lag1",
             "runs_z", "hurst", "spectral_flat",
         ])
-        print(f"[renderer] CSV -> {self._csv_path}")
+        logger.info("CSV -> %s", self._csv_path)
 
     # ------------------------------------------------------------------ #
     #  Public API                                                          #
@@ -71,6 +86,11 @@ class Renderer:
         """Ingest one FeatureFrame and append to CSV immediately."""
         self._frames.append(frame)
         self._raw_samples.append(raw.copy())
+
+        # Trim in-memory buffers to avoid unbounded growth during long sessions
+        if len(self._frames) > MAX_FRAME_HISTORY:
+            self._frames = self._frames[-MAX_FRAME_HISTORY:]
+            self._raw_samples = self._raw_samples[-MAX_FRAME_HISTORY:]
 
         idx = len(self._frames) - 1
         self._csv_writer.writerow([
@@ -93,7 +113,7 @@ class Renderer:
         Panel 2: Feature timeline (all 6 metrics stacked)
         """
         if len(self._frames) < 4:
-            print("[renderer] Not enough frames to render yet.")
+            logger.warning("Not enough frames to render yet (%d < 4).", len(self._frames))
             return ""
 
         filename = f"{self._png_base}{suffix}.png"
@@ -192,9 +212,9 @@ class Renderer:
 
         plt.savefig(filename, dpi=DPI, bbox_inches="tight")
         plt.close(fig)
-        print(f"[renderer] Spectrogram -> {filename}")
+        logger.info("Spectrogram -> %s", filename)
         return filename
 
     def close(self) -> None:
         self._csv_file.close()
-        print(f"[renderer] CSV closed: {self._csv_path}")
+        logger.info("CSV closed: %s", self._csv_path)
