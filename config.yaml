@@ -1,0 +1,134 @@
+QRNG_Sonifier:
+  # General settings
+  version: "1.0"
+  
+  # Output directory
+  output_dir: "./output"
+  
+  # Session duration (None = indefinite)
+  duration: null
+  
+  # API polling settings
+  api:
+    url: "https://qrng.anu.edu.au/API/jsonI.php"
+    batch_size: 1024
+    poll_interval: 0.5
+    timeout: 10
+    retry_max_attempts: 3
+    retry_backoff_base: 2
+  
+  # Feature extraction window settings
+  features:
+    window: 512      # samples per analysis window
+    step: 128        # new frame every N samples (overlap = window - step)
+    history: 200     # keep last N frames in memory
+    
+  # Audio synthesis settings (disabled with --no-audio)
+  audio:
+    enabled: true
+    sample_rate: 44100
+    block_size: 1024
+    qrng_base_freq: 220.0    # A3 - QRNG center pitch
+    prng_base_freq: 165.0    # E3 - PRNG center pitch (fifth below)
+    pitch_range_cents: 400   # +/-200 cents for bias modulation
+    smooth_alpha: 0.05       # low-pass smoothing factor
+    
+  # Anomaly detection settings
+  anomaly:
+    enabled: true
+    cooldown_seconds: 5.0
+    triggers:
+      - name: entropy_drop
+        threshold: 0.85
+        consecutive: 3
+        cooldown: 10.0
+        audio_event: low_tone
+        severity: critical
+        
+      - name: entropy_surge
+        threshold: 0.999
+        consecutive: 2
+        cooldown: 15.0
+        audio_event: chime
+        severity: info
+        
+      - name: bias_drift
+        threshold: 0.15
+        consecutive: 5
+        cooldown: 8.0
+        audio_event: sweep
+        severity: warning
+        
+      - name: autocorr_spike
+        threshold: 0.12
+        consecutive: 3
+        cooldown: 6.0
+        audio_event: burst
+        severity: warning
+        
+      - name: runs_anomaly
+        threshold: 3.0
+        consecutive: 2
+        cooldown: 5.0
+        audio_event: click
+        severity: warning
+        
+      - name: hurst_persist
+        threshold: 0.65
+        consecutive: 4
+        cooldown: 10.0
+        audio_event: sweep
+        severity: warning
+        
+      - name: hurst_antipersist
+        threshold: 0.35
+        consecutive: 4
+        cooldown: 10.0
+        audio_event: sweep
+        severity: info
+        
+      - name: spectral_narrow
+        threshold: 0.50
+        consecutive: 3
+        cooldown: 8.0
+        audio_event: burst
+        severity: warning
+        
+      - name: source_diverge
+        threshold: 0.05
+        consecutive: 2
+        cooldown: 12.0
+        audio_event: chime
+        severity: critical
+        
+      - name: regime_change
+        threshold: 0.30
+        consecutive: 1
+        cooldown: 5.0
+        audio_event: click
+        severity: warning
+
+  # Visualization settings
+  visualization:
+    dpi: 300
+    figure_size: [14, 8]
+    colormap: "inferno"
+    render_interval: 60  # seconds between PNG exports
+    
+  # PRNG comparison (dual-source mode)
+  prng_comparison:
+    enabled: false
+    generator: pcg64      # mt19937, pcg64, sfc64
+    seed: null            # None = random seed
+    verbose: true
+
+  # WebSocket streaming for web dashboard
+  websocket:
+    enabled: false
+    port: 8765
+    
+  # Web dashboard settings
+  web_dashboard:
+    enabled: false
+    host: "127.0.0.1"
+    port: 5000
