@@ -25,5 +25,8 @@ Thumbs.db
 # Output data (regenerated at runtime)
 output/
 
+# Claude
+.claude/
+
 # Environment variables
 .env
