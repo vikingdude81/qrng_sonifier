@@ -7,7 +7,10 @@ abstract: >-
   Generator (QRNG) data from ANU QRNG API. Features statistical analysis,
   anomaly detection, live spectrograms, and multi-modal interfaces.
 authors:
-  - alias: vikingdude81
+  - given-names: Alex
+    family-names: Bone
+    orcid: "https://orcid.org/0009-0003-4252-7556"
+    alias: vikingdude81
 repository-code: "https://github.com/vikingdude81/qrng_sonifier"
 license: MIT
 version: "1.0.0"
