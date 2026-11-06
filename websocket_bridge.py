@@ -151,9 +151,14 @@ class SocketIOServerBridge:
         self._bridge = WebSocketBridge()
         
         # Register event handlers
+        try:
+            from flask import request  # pyright: ignore[reportMissingImports]
+        except ImportError:  # pragma: no cover
+            request = None
+
         @socketio.on('connect')
         def on_connect():
-            client_id = request.sid if 'request' in dir() else "unknown"
+            client_id = getattr(request, "sid", None) or "unknown"
             self._bridge.register_client(client_id)
             print(f"[WebSocket] Client connected: {client_id}")
             
@@ -162,7 +167,7 @@ class SocketIOServerBridge:
         
         @socketio.on('disconnect')
         def on_disconnect():
-            client_id = request.sid if 'request' in dir() else "unknown"
+            client_id = getattr(request, "sid", None) or "unknown"
             self._bridge.unregister_client(client_id)
             print(f"[WebSocket] Client disconnected: {client_id}")
 
