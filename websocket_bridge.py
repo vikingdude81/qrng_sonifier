@@ -8,8 +8,7 @@ CLI process to the Flask web dashboard via WebSocket connections.
 from __future__ import annotations
 import threading
 import time
-import json
-from typing import Callable, Optional, Deque, Dict, Any
+from typing import Callable, Optional, Deque
 from collections import deque
 import numpy as np
 
@@ -188,7 +187,8 @@ class SocketIOServerBridge:
 def create_cli_with_websocket():
     """Create a CLI app that streams to WebSocket clients."""
     
-    from flask import request
+    from flask import jsonify
+    from flask_socketio import SocketIO
     
     socketio = SocketIO(cors_allowed_origins="*")
     

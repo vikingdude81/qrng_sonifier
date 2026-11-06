@@ -309,14 +309,14 @@ def main() -> None:
 
         elapsed = time.time() - start_time
         print(f"\n{'=' * 65}")
-        print(f"  Session summary")
+        print("  Session summary")
         print(f"  Runtime          : {elapsed:.1f}s")
         print(f"  QRNG samples     : {total_samples_qrng:,}")
         if prng_source:
             print(f"  PRNG samples     : {total_samples_prng:,}")
         print(f"  Feature frames   : {total_frames:,}")
         if anomaly_counts:
-            print(f"  Anomaly events   :")
+            print("  Anomaly events   :")
             for name, cnt in sorted(anomaly_counts.items(), key=lambda x: -x[1]):
                 print(f"    {name:24s} x {cnt}")
         print(f"  Output dir       : {args.output_dir}")

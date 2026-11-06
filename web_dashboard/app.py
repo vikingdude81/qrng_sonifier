@@ -10,14 +10,12 @@ Provides a real-time web interface with:
 """
 
 from __future__ import annotations
-import json
 import logging
 import threading
 import time
 import os
 from flask import Flask, render_template, jsonify
 from flask_socketio import SocketIO, emit
-import numpy as np
 
 logger = logging.getLogger(__name__)
 

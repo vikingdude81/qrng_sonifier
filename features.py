@@ -13,10 +13,9 @@ Each window of uint8 samples produces a FeatureFrame:
 from __future__ import annotations
 import logging
 import numpy as np
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Deque
 from collections import deque
-import scipy.stats as stats
 
 logger = logging.getLogger(__name__)
 
@@ -251,7 +250,7 @@ class FeatureEngine:
         """
         # Define target range (middle of uint8 range)
         lower, upper = 120, 135
-        n_total = len(w)
+        len(w)
         
         # Count values in target range
         in_range = np.sum((w >= lower) & (w <= upper))

@@ -11,7 +11,7 @@ import time
 import requests
 from requests.exceptions import RequestException, Timeout, ConnectionError, HTTPError
 import numpy as np
-from typing import Optional, Callable, Tuple
+from typing import Optional, Tuple
 
 ANU_URL = "https://qrng.anu.edu.au/API/jsonI.php"
 BATCH_SIZE = 1024  # uint8 samples per request (API max ~1024)
@@ -284,7 +284,7 @@ class QRNGIngestor:
                 return np.array(data["data"], dtype=np.uint8)
             else:
                 if self.verbose:
-                    print(f"[ingest] API returned success=False")
+                    print("[ingest] API returned success=False")
                 return None
                 
         except Timeout:
@@ -297,7 +297,7 @@ class QRNGIngestor:
             else:
                 raise HTTPError(f"HTTP error {e.response.status_code}")
                 
-        except RequestException as e:
+        except RequestException:
             raise
             
         except Exception as e:

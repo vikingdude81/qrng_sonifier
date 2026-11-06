@@ -15,9 +15,8 @@ import time
 from typing import Optional
 
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk
 
-import numpy as np
 import matplotlib
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt

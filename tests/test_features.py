@@ -20,7 +20,7 @@ class TestEntropy(unittest.TestCase):
 
     def test_max_entropy_uniform(self):
         """Uniform distribution should yield max entropy (~8 bits)."""
-        engine = FeatureEngine()
+        FeatureEngine()
         uniform = np.random.uniform(0, 1, 10000) * 256
         # Bincount-based entropy from _entropy method
         counts = np.bincount(uniform.astype(np.int64), minlength=256)
@@ -33,7 +33,7 @@ class TestEntropy(unittest.TestCase):
 
     def test_min_entropy_constant(self):
         """Constant value should yield zero entropy."""
-        engine = FeatureEngine()
+        FeatureEngine()
         constant = np.full(100, 127, dtype=np.float64)
         counts = np.bincount(constant.astype(np.int64), minlength=256)
         p = counts / counts.sum()
@@ -44,7 +44,7 @@ class TestEntropy(unittest.TestCase):
 
     def test_entropy_bounds(self):
         """Entropy should always be in [0, 1]."""
-        engine = FeatureEngine()
+        FeatureEngine()
         for _ in range(100):
             data = np.random.randint(0, 256, size=512).astype(np.float64)
             counts = np.bincount(data.astype(np.int64), minlength=256)
@@ -61,7 +61,7 @@ class TestBias(unittest.TestCase):
 
     def test_zero_bias_uniform(self):
         """Uniform distribution should have near-zero mean bias."""
-        engine = FeatureEngine()
+        FeatureEngine()
         # Use larger sample for better convergence to expected value
         uniform = np.random.uniform(0, 1, 5000) * 256
         mean = uniform.mean()
@@ -71,7 +71,7 @@ class TestBias(unittest.TestCase):
 
     def test_positive_bias(self):
         """Distribution skewed high should have positive bias."""
-        engine = FeatureEngine()
+        FeatureEngine()
         # Values centered around 200
         data = np.random.normal(200, 30, 512).clip(0, 255).astype(np.float64)
         mean = data.mean()
@@ -80,7 +80,7 @@ class TestBias(unittest.TestCase):
 
     def test_negative_bias(self):
         """Distribution skewed low should have negative bias."""
-        engine = FeatureEngine()
+        FeatureEngine()
         # Values centered around 50
         data = np.random.normal(50, 30, 512).clip(0, 255).astype(np.float64)
         mean = data.mean()
@@ -89,7 +89,7 @@ class TestBias(unittest.TestCase):
 
     def test_bias_bounds(self):
         """Bias should be clipped to [-1, 1]."""
-        engine = FeatureEngine()
+        FeatureEngine()
         for _ in range(100):
             data = np.random.randint(0, 256, size=512).astype(np.float64)
             mean = data.mean()
@@ -104,7 +104,7 @@ class TestAutocorrelation(unittest.TestCase):
 
     def test_random_near_zero_ac(self):
         """Random data should have near-zero autocorrelation."""
-        engine = FeatureEngine()
+        FeatureEngine()
         random_data = np.random.randint(0, 256, size=512).astype(np.float64)
         x = random_data - random_data.mean()
         denom = np.dot(x, x)
@@ -114,7 +114,7 @@ class TestAutocorrelation(unittest.TestCase):
 
     def test_positive_autocorrelation(self):
         """Smooth data should have positive autocorrelation."""
-        engine = FeatureEngine()
+        FeatureEngine()
         # Create slowly varying signal
         t = np.linspace(0, 1, 512)
         smooth = (np.sin(t * 10) + 1) / 2 * 256
@@ -126,7 +126,7 @@ class TestAutocorrelation(unittest.TestCase):
 
     def test_negative_autocorrelation(self):
         """Alternating data should have negative autocorrelation."""
-        engine = FeatureEngine()
+        FeatureEngine()
         # Create alternating pattern: 0, 255, 0, 255...
         alt = np.zeros(512)
         alt[::2] = 0
